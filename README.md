@@ -61,6 +61,19 @@ firebase login
 firebase use bill-splitt        # or: firebase use --add  to pick/create a project
 ```
 
+### 3.5. Regenerate local Firebase client config if needed
+
+This repo does not track `lib/firebase_options.dart`. If you need Firebase
+client initialization for local work, generate it on your machine:
+
+```bash
+dart pub global activate flutterfire_cli
+flutterfire configure
+```
+
+The generated file stays local and is gitignored. See
+`lib/firebase_options.example.dart` for the expected shape.
+
 ### 4. Get a Gemini API key
 
 1. Go to https://aistudio.google.com/app/apikey and sign in.
