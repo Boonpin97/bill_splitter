@@ -1,0 +1,125 @@
+import '../models/receipt.dart';
+import '../models/payer.dart';
+import '../models/split_result.dart';
+import 'debt_simplifier.dart';
+
+/// Computes per-payer totals and simplified transfers from the receipt,
+/// the assignment grid (payerId -> itemId -> quantity), and how much each
+/// payer actually paid at the till.
+SplitResult computeSplit({
+  required Receipt receipt,
+  required List<Payer> payers,
+  required Map<String, Map<String, int>> assignments,
+  required Map<String, double> paid,
+}) {
+  final itemById = {for (final it in receipt.items) it.id: it};
+
+  // Sum claimed shares per item across all payers so we can split proportionally.
+  // Only count non-zero claims so we never divide by zero.
+  final totalClaimed = <String, int>{};
+  for (final p in payers) {
+    for (final entry in (assignments[p.id] ?? const {}).entries) {
+      if (entry.value > 0) {
+        totalClaimed[entry.key] = (totalClaimed[entry.key] ?? 0) + entry.value;
+      }
+    }
+  }
+
+  final itemTotals = <String, double>{for (final p in payers) p.id: 0};
+  for (final p in payers) {
+    final perItem = assignments[p.id] ?? const {};
+    for (final entry in perItem.entries) {
+      if (entry.value == 0) continue;
+      final item = itemById[entry.key];
+      if (item == null) continue;
+      final shares = totalClaimed[entry.key] ?? 1;
+      itemTotals[p.id] =
+          (itemTotals[p.id] ?? 0) + (entry.value / shares) * item.lineTotal;
+    }
+  }
+
+  final subtotalAcross = itemTotals.values.fold<double>(0, (a, b) => a + b);
+
+  // Exclusive charges compound on each other in receipt order
+  // (e.g. service charge first, then GST on subtotal + service).
+  // Also build a per-payer breakdown for display on the summary screen.
+  final perPayerBreakdowns = <String, List<ChargeEntry>>{
+    for (final p in payers) p.id: [],
+  };
+  double runningTotal = subtotalAcross;
+  for (final c in receipt.charges) {
+    if (c.mode != ChargeMode.exclusive) continue;
+    final amt = c.amount ?? (c.percent != null ? runningTotal * c.percent! : 0);
+    for (final p in payers) {
+      final proportion =
+          subtotalAcross > 0 ? (itemTotals[p.id] ?? 0) / subtotalAcross : 0.0;
+      final personAmt = _round2(amt * proportion);
+      perPayerBreakdowns[p.id]!.add(ChargeEntry(
+        label: c.displayName(),
+        amount: c.kind == ChargeKind.discount ? -personAmt.abs() : personAmt,
+        percent: c.percent,
+      ));
+    }
+    if (c.kind == ChargeKind.discount) {
+      runningTotal -= amt.abs();
+    } else {
+      runningTotal += amt;
+    }
+  }
+  final exclusiveCharges = runningTotal - subtotalAcross;
+
+  final chargeShare = <String, double>{};
+  for (final p in payers) {
+    if (subtotalAcross <= 0) {
+      chargeShare[p.id] = 0;
+    } else {
+      chargeShare[p.id] =
+          exclusiveCharges * ((itemTotals[p.id] ?? 0) / subtotalAcross);
+    }
+  }
+
+  // Round totals; absorb residual into first payer with a non-zero subtotal.
+  final rawTotals = <String, double>{
+    for (final p in payers)
+      p.id: (itemTotals[p.id] ?? 0) + (chargeShare[p.id] ?? 0),
+  };
+  final rounded = <String, double>{
+    for (final entry in rawTotals.entries)
+      entry.key: _round2(entry.value),
+  };
+  final grand = subtotalAcross + exclusiveCharges;
+  final residual = _round2(grand) -
+      rounded.values.fold<double>(0, (a, b) => a + b);
+  if (residual.abs() > 0.0001 && payers.isNotEmpty) {
+    final anchor = payers
+        .firstWhere(
+          (p) => (itemTotals[p.id] ?? 0) > 0,
+          orElse: () => payers.first,
+        )
+        .id;
+    rounded[anchor] = _round2((rounded[anchor] ?? 0) + residual);
+  }
+
+  final totals = payers
+      .map((p) => PayerTotal(
+            payerId: p.id,
+            itemTotal: _round2(itemTotals[p.id] ?? 0),
+            chargeShare: _round2((rounded[p.id] ?? 0) - (itemTotals[p.id] ?? 0)),
+            chargeBreakdown: perPayerBreakdowns[p.id] ?? [],
+          ))
+      .toList();
+
+  final balances = <String, double>{
+    for (final p in payers)
+      p.id: (paid[p.id] ?? 0) - (rounded[p.id] ?? 0),
+  };
+  final transfers = simplifyDebts(balances);
+
+  return SplitResult(
+    totals: totals,
+    transfers: transfers,
+    grandTotal: _round2(grand),
+  );
+}
+
+double _round2(double v) => (v * 100).round() / 100.0;
