@@ -7,7 +7,7 @@ class ChargeEntry {
   String get displayLabel {
     if (percent == null) return label;
     final pct = percent! * 100;
-    final pctStr = pct % 1 == 0 ? '${pct.toInt()}%' : '${pct}%';
+    final pctStr = pct % 1 == 0 ? '${pct.toInt()}%' : '$pct%';
     return '$label ($pctStr)';
   }
 }
@@ -29,7 +29,11 @@ class PayerTotal {
 }
 
 class Transfer {
-  Transfer({required this.fromPayerId, required this.toPayerId, required this.amount});
+  Transfer({
+    required this.fromPayerId,
+    required this.toPayerId,
+    required this.amount,
+  });
 
   final String fromPayerId;
   final String toPayerId;
@@ -37,7 +41,11 @@ class Transfer {
 }
 
 class SplitResult {
-  SplitResult({required this.totals, required this.transfers, required this.grandTotal});
+  SplitResult({
+    required this.totals,
+    required this.transfers,
+    required this.grandTotal,
+  });
 
   final List<PayerTotal> totals;
   final List<Transfer> transfers;

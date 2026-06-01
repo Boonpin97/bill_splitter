@@ -10,6 +10,52 @@ enum ReceiptAnalysisStage { warmingServer, sendingImage, waitingForGoogle }
 typedef ReceiptAnalysisStageCallback =
     void Function(ReceiptAnalysisStage stage);
 
+String formatReceiptAnalysisError(Object error) {
+  final raw = '$error';
+  final normalized = raw.toLowerCase();
+
+  if (_isServerUnreachableError(normalized)) {
+    return "Can't reach the server :/";
+  }
+  if (_isGeminiHighDemandError(normalized)) {
+    return "Opss it's in high demand right now";
+  }
+  if (_isLimitExceededError(normalized)) {
+    return "Alright that's all I can process for today";
+  }
+  return raw;
+}
+
+bool _isServerUnreachableError(String normalized) {
+  return normalized.contains('failed host lookup') ||
+      normalized.contains('socketexception') ||
+      normalized.contains('xmlhttprequest error') ||
+      normalized.contains('clientexception') ||
+      normalized.contains('failed to fetch') ||
+      normalized.contains('network request failed') ||
+      (normalized.contains('google') &&
+          (normalized.contains('unreachable') ||
+              normalized.contains('unavailable') ||
+              normalized.contains('dns') ||
+              normalized.contains('econnreset') ||
+              normalized.contains('enotfound')));
+}
+
+bool _isGeminiHighDemandError(String normalized) {
+  return normalized.contains('gemini call failed: 429') ||
+      normalized.contains('resource exhausted') ||
+      normalized.contains('high demand') ||
+      normalized.contains('currently overloaded') ||
+      normalized.contains('too many requests');
+}
+
+bool _isLimitExceededError(String normalized) {
+  return normalized.contains('limit exceeded') ||
+      normalized.contains('quota exceeded') ||
+      normalized.contains('daily limit') ||
+      normalized.contains('daily quota');
+}
+
 abstract class ReceiptAnalyzer {
   Future<Receipt> analyze(
     Uint8List bytes, {

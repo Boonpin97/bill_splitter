@@ -3,14 +3,14 @@
 This project can use Google Document AI OCR to support Gemini receipt parsing.
 The browser still sends the receipt image to the Firebase function once.
 
-Default analysis is Gemini-first:
+Default analysis uses OCR first when Document AI is configured:
 
-1. The function sends the image directly to Gemini.
-2. If Gemini succeeds, the app opens the review screen immediately.
-3. If Gemini fails, the function tries Document AI OCR and then retries Gemini
-   with both the OCR text and the original image.
-4. On the review screen, the user can tap **Reanalyze with OCR** to force the
-   Document AI-assisted path if the first result looks inaccurate.
+1. The function tries Document AI OCR.
+2. The function sends Gemini both the OCR text and the original image.
+3. If Gemini is rate-limited, the function waits once when time allows, then
+   retries Gemini with the same OCR text and image.
+4. On the review screen, the user can tap **Reanalyze with OCR** to run the same
+   Document AI-assisted path again if the first result looks inaccurate.
 
 If Document AI is not configured, or if OCR fails, the function falls back to
 Gemini image-only analysis.
@@ -153,7 +153,8 @@ firebase functions:log --only analyzeReceipt
 Document AI OCR failed; continuing with image-only Gemini
 ```
 
-No such warning usually means Document AI was reached successfully.
+No such warning usually means Document AI was reached successfully before the
+Gemini request.
 
 ## 7. Common Errors
 

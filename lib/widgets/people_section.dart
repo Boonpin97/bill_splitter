@@ -223,9 +223,20 @@ class _ManageSheetState extends State<_ManageSheet> {
   late final TextEditingController _controller = TextEditingController(
     text: widget.payer.name,
   );
+  late final FocusNode _focusNode = FocusNode();
+  bool _didAutoSelect = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_handleFocusChange);
+  }
 
   @override
   void dispose() {
+    _focusNode
+      ..removeListener(_handleFocusChange)
+      ..dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -275,6 +286,7 @@ class _ManageSheetState extends State<_ManageSheet> {
           const SizedBox(height: 20),
           TextField(
             controller: _controller,
+            focusNode: _focusNode,
             autofocus: true,
             decoration: const InputDecoration(labelText: 'Name'),
             onSubmitted: _submit,
@@ -312,5 +324,14 @@ class _ManageSheetState extends State<_ManageSheet> {
     final name = v.trim();
     if (name.isNotEmpty) widget.onRename(name);
     Navigator.of(context).maybePop();
+  }
+
+  void _handleFocusChange() {
+    if (!_focusNode.hasFocus || _didAutoSelect) return;
+    _didAutoSelect = true;
+    _controller.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _controller.text.length,
+    );
   }
 }

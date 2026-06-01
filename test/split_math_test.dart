@@ -13,13 +13,15 @@ void main() {
         items: [i1, i2],
         charges: [
           Charge(
-              kind: ChargeKind.serviceCharge,
-              mode: ChargeMode.exclusive,
-              percent: 0.10),
+            kind: ChargeKind.serviceCharge,
+            mode: ChargeMode.exclusive,
+            percent: 0.10,
+          ),
           Charge(
-              kind: ChargeKind.gst,
-              mode: ChargeMode.exclusive,
-              percent: 0.09),
+            kind: ChargeKind.gst,
+            mode: ChargeMode.exclusive,
+            percent: 0.09,
+          ),
         ],
         subtotal: 40,
         total: 47.60,
@@ -38,17 +40,15 @@ void main() {
         paid: {alice.id: 0, bob.id: 47.60},
       );
 
-      final aliceTotal =
-          result.totals.firstWhere((t) => t.payerId == alice.id);
+      final aliceTotal = result.totals.firstWhere((t) => t.payerId == alice.id);
       final bobTotal = result.totals.firstWhere((t) => t.payerId == bob.id);
 
-      // Alice: 10 + 10*(0.19) = 11.90; Bob: 30 + 30*(0.19) = 35.70
-      expect(aliceTotal.total, closeTo(11.90, 0.02));
-      expect(bobTotal.total, closeTo(35.70, 0.02));
+      // Alice: 10 + 10*(0.199) = 11.99; Bob: 30 + 30*(0.199) = 35.97
+      expect(aliceTotal.total, closeTo(11.99, 0.02));
+      expect(bobTotal.total, closeTo(35.97, 0.02));
 
       // Sum of totals ≈ grand total
-      final sum =
-          result.totals.fold<double>(0, (s, t) => s + t.total);
+      final sum = result.totals.fold<double>(0, (s, t) => s + t.total);
       expect(sum, closeTo(result.grandTotal, 0.01));
 
       // Bob paid the bill, Alice owes him her share.
@@ -65,9 +65,10 @@ void main() {
         charges: [
           // Already in the unit price; should not be added on top.
           Charge(
-              kind: ChargeKind.gst,
-              mode: ChargeMode.inclusive,
-              percent: 0.09),
+            kind: ChargeKind.gst,
+            mode: ChargeMode.inclusive,
+            percent: 0.09,
+          ),
         ],
         subtotal: 21.80,
         total: 21.80,
@@ -83,8 +84,7 @@ void main() {
         },
         paid: {a.id: 21.80, b.id: 0},
       );
-      final aTotal =
-          result.totals.firstWhere((t) => t.payerId == a.id);
+      final aTotal = result.totals.firstWhere((t) => t.payerId == a.id);
       expect(aTotal.total, closeTo(21.80, 0.01));
       expect(result.grandTotal, closeTo(21.80, 0.01));
     });
@@ -96,9 +96,10 @@ void main() {
         items: [shared],
         charges: [
           Charge(
-              kind: ChargeKind.serviceCharge,
-              mode: ChargeMode.exclusive,
-              percent: 0.10),
+            kind: ChargeKind.serviceCharge,
+            mode: ChargeMode.exclusive,
+            percent: 0.10,
+          ),
         ],
         subtotal: 40,
         total: 44,
@@ -129,9 +130,10 @@ void main() {
         items: [i],
         charges: [
           Charge(
-              kind: ChargeKind.discount,
-              mode: ChargeMode.exclusive,
-              amount: 10),
+            kind: ChargeKind.discount,
+            mode: ChargeMode.exclusive,
+            amount: 10,
+          ),
         ],
         subtotal: 50,
         total: 40,
@@ -148,5 +150,114 @@ void main() {
       expect(result.totals.first.total, closeTo(40.0, 0.01));
       expect(result.grandTotal, closeTo(40.0, 0.01));
     });
+
+    test('discount reduces subtotal before service and GST compound', () {
+      final noodle = LineItem(name: 'Noodle', unitPrice: 12, quantity: 1);
+      final receipt = Receipt(
+        currency: 'SGD',
+        items: [noodle],
+        charges: [
+          Charge(
+            kind: ChargeKind.discount,
+            mode: ChargeMode.exclusive,
+            amount: 2,
+          ),
+          Charge(
+            kind: ChargeKind.serviceCharge,
+            mode: ChargeMode.exclusive,
+            percent: 0.10,
+          ),
+          Charge(
+            kind: ChargeKind.gst,
+            mode: ChargeMode.exclusive,
+            percent: 0.09,
+          ),
+        ],
+        subtotal: 10,
+        total: 11.99,
+      );
+      final payer = Payer(name: 'A');
+
+      final result = computeSplit(
+        receipt: receipt,
+        payers: [payer],
+        assignments: {
+          payer.id: {noodle.id: 1},
+        },
+        paid: {payer.id: 11.99},
+      );
+
+      expect(result.totals.first.itemTotal, closeTo(10.0, 0.01));
+      expect(result.totals.first.chargeShare, closeTo(1.99, 0.01));
+      expect(result.grandTotal, closeTo(11.99, 0.01));
+    });
+
+    test(
+      'percentage charge calculation wins until printed amount is selected',
+      () {
+        final item = LineItem(name: 'Meal', unitPrice: 100, quantity: 1);
+        final receipt = Receipt(
+          currency: 'SGD',
+          items: [item],
+          charges: [
+            Charge(
+              kind: ChargeKind.gst,
+              mode: ChargeMode.exclusive,
+              percent: 0.10,
+              amount: 12,
+            ),
+          ],
+          subtotal: 100,
+          total: 110,
+        );
+        final payer = Payer(name: 'A');
+
+        final result = computeSplit(
+          receipt: receipt,
+          payers: [payer],
+          assignments: {
+            payer.id: {item.id: 1},
+          },
+          paid: {payer.id: 110},
+        );
+
+        expect(result.grandTotal, closeTo(110, 0.01));
+        expect(result.totals.first.chargeShare, closeTo(10, 0.01));
+      },
+    );
+
+    test(
+      'printed subtotal discount is applied when discount charge is missing',
+      () {
+        final item = LineItem(name: 'Meal', unitPrice: 100, quantity: 1);
+        final receipt = Receipt(
+          currency: 'SGD',
+          items: [item],
+          charges: [
+            Charge(
+              kind: ChargeKind.serviceCharge,
+              mode: ChargeMode.exclusive,
+              percent: 0.10,
+            ),
+          ],
+          subtotal: 90,
+          total: 99,
+        );
+        final payer = Payer(name: 'A');
+
+        final result = computeSplit(
+          receipt: receipt,
+          payers: [payer],
+          assignments: {
+            payer.id: {item.id: 1},
+          },
+          paid: {payer.id: 99},
+        );
+
+        expect(result.totals.first.itemTotal, closeTo(90, 0.01));
+        expect(result.totals.first.chargeShare, closeTo(9, 0.01));
+        expect(result.grandTotal, closeTo(99, 0.01));
+      },
+    );
   });
 }

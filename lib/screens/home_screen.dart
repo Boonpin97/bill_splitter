@@ -28,7 +28,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   static const Map<ReceiptAnalysisStage, String> _analysisStageLabels = {
     ReceiptAnalysisStage.warmingServer: 'Shaking up the server...',
     ReceiptAnalysisStage.sendingImage: 'Humbly offering the image...',
-    ReceiptAnalysisStage.waitingForGoogle: 'Waiting for me answers...',
+    ReceiptAnalysisStage.waitingForGoogle:
+        "Waiting for Google's magic to happen...",
   };
 
   @override
@@ -89,7 +90,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ),
       );
     } catch (e) {
-      setState(() => _error = '$e');
+      setState(() => _error = formatReceiptAnalysisError(e));
     } finally {
       _scanController.stop();
       _scanController.reset();

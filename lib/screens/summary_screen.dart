@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/split_result.dart';
+import '../services/receipt_totals.dart';
 import '../state/bill_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/paper_background.dart';
@@ -243,6 +244,7 @@ class SummaryScreen extends StatelessWidget {
     required BillState state,
   }) {
     final receipt = state.receipt!;
+    final totals = calculateReceiptTotals(receipt);
     const sep = '--------------------------';
     final lines = <String>['Bill Summary', sep];
 
@@ -257,8 +259,9 @@ class SummaryScreen extends StatelessWidget {
           0,
           (s, p) => s + state.qty(p.id, item.id),
         );
-        final sharePrice =
-            totalClaimed > 0 ? (myQty / totalClaimed) * item.lineTotal : 0.0;
+        final sharePrice = totalClaimed > 0
+            ? (myQty / totalClaimed) * item.lineTotal
+            : 0.0;
         lines.add('- ${item.name}: ${fmt.format(sharePrice)}');
       }
 
@@ -269,7 +272,7 @@ class SummaryScreen extends StatelessWidget {
       lines.add('');
     }
 
-    lines.add('Sub Total:${receipt.subtotal}');
+    lines.add('Sub Total: ${fmt.format(totals.discountedSubtotal)}');
     lines.add('Grand Total: ${fmt.format(split.grandTotal)}');
     lines.add(sep);
     lines.add('');
@@ -337,7 +340,12 @@ class _PersonRow extends StatelessWidget {
         children: [
           Row(
             children: [
-              PayerAvatar(payer: payer, colorIndex: colorIndex, size: 42, qty: 1),
+              PayerAvatar(
+                payer: payer,
+                colorIndex: colorIndex,
+                size: 42,
+                qty: 1,
+              ),
               const SizedBox(width: 14),
               Expanded(
                 child: Text(

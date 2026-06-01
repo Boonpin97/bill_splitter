@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../models/payer.dart';
 import '../models/receipt.dart';
 import '../models/split_result.dart';
+import '../services/receipt_totals.dart';
 import '../services/split_math.dart';
 
 class BillState extends ChangeNotifier {
@@ -56,18 +57,7 @@ class BillState extends ChangeNotifier {
   double get derivedTotal {
     final r = _receipt;
     if (r == null) return 0;
-    final subtotal = r.items.fold<double>(0, (s, item) => s + item.lineTotal);
-    double running = subtotal;
-    for (final c in r.charges) {
-      if (c.mode != ChargeMode.exclusive) continue;
-      final amt = c.amount ?? (c.percent != null ? running * c.percent! : 0);
-      if (c.kind == ChargeKind.discount) {
-        running -= amt.abs();
-      } else {
-        running += amt;
-      }
-    }
-    return running;
+    return calculateReceiptTotals(r).total;
   }
 
   void setReceipt(Receipt receipt) {

@@ -30,11 +30,11 @@ interface Receipt {
   charges: Array<{
     kind: "gst" | "service" | "discount" | "other";
     mode: "inclusive" | "exclusive"; // inclusive means already in unitPrice
-    percent?: number;          // 0.09 for 9% if known
-    amount?: number;           // explicit currency amount if percent unknown
+    percent?: number;          // 0.09 for 9% if printed
+    amount?: number;           // printed currency amount for this charge, if shown
     label?: string;            // verbatim label from receipt, optional
   }>;
-  subtotal: number;            // pre-tax/service if shown, else best guess
+  subtotal: number;            // after discounts, before tax/service
   total: number;               // grand total as printed
 }
 
@@ -42,7 +42,10 @@ Rules:
 - Output JSON only, no code fences.
 - Combine duplicate-line items only when the receipt itself shows a quantity column.
 - Mark a charge "inclusive" only if the receipt explicitly says the prices include it (e.g. "GST inclusive"). Otherwise default to "exclusive".
-- Use percent OR amount, prefer percent when stated.
+- Return discounts as charges with kind "discount" so the app can subtract them before service/GST/tax. Do not include discounts in the tax/service total.
+- Subtotal should be item total minus discounts, before service/GST/tax.
+- For tax/service charges, include both percent and amount when the receipt prints both. The app will calculate from percent and compare it to the printed amount.
+- If only one is shown, include only that field.
 - If a value is unknown, omit the field rather than guessing wildly.`;
 
 function promptWithOcrText(ocrText?: string): string {
@@ -195,38 +198,34 @@ export const analyzeReceipt = onRequest(
     let ocrText: string | undefined;
 
     try {
-      if (analysisMode !== "ocr") {
-        try {
-          const parsed = await parseGeminiReceipt(
-            await callGemini(imageBase64, imageMimeType)
-          );
-          res.status(200).json(parsed);
-          return;
-        } catch (e) {
-          if (e instanceof GeminiRateLimitError) {
-            const elapsed = Date.now() - startMs;
-            const wait = e.retryAfterMs;
-            if (elapsed + wait < maxWaitMs) {
-              console.info(`Gemini rate-limited; waiting ${wait}ms then retrying.`);
-              await new Promise((r) => setTimeout(r, wait));
-            } else {
-              throw e;
-            }
-          } else {
-            console.warn("Gemini image-only analysis failed; retrying with OCR", e);
-          }
-        }
-      }
-
       try {
         ocrText = await extractOcrText(imageBase64, imageMimeType);
       } catch (e) {
         console.warn("Document AI OCR failed; continuing with image-only Gemini", e);
       }
 
-      const parsed = await parseGeminiReceipt(
-        await callGemini(imageBase64, imageMimeType, ocrText)
-      );
+      let parsed: unknown;
+      try {
+        parsed = await parseGeminiReceipt(
+          await callGemini(imageBase64, imageMimeType, ocrText)
+        );
+      } catch (e) {
+        if (e instanceof GeminiRateLimitError && analysisMode !== "ocr") {
+          const elapsed = Date.now() - startMs;
+          const wait = e.retryAfterMs;
+          if (elapsed + wait < maxWaitMs) {
+            console.info(`Gemini rate-limited; waiting ${wait}ms then retrying.`);
+            await new Promise((r) => setTimeout(r, wait));
+            parsed = await parseGeminiReceipt(
+              await callGemini(imageBase64, imageMimeType, ocrText)
+            );
+          } else {
+            throw e;
+          }
+        } else {
+          throw e;
+        }
+      }
       res.status(200).json(parsed);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);

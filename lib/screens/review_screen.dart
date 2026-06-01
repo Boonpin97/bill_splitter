@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../models/receipt.dart';
 import '../services/receipt_api.dart';
+import '../services/receipt_totals.dart';
 import '../state/bill_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/charges_panel.dart';
@@ -36,7 +37,8 @@ class _ReviewScreenState extends State<ReviewScreen> {
   static const Map<ReceiptAnalysisStage, String> _ocrStageLabels = {
     ReceiptAnalysisStage.warmingServer: 'Shaking up the server...',
     ReceiptAnalysisStage.sendingImage: 'Humbly offering the image...',
-    ReceiptAnalysisStage.waitingForGoogle: 'Waiting for me answers...',
+    ReceiptAnalysisStage.waitingForGoogle:
+        "Didn't work the first time, let me try again",
   };
 
   Future<void> _reanalyzeWithOcr() async {
@@ -64,7 +66,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
     } catch (e) {
       if (!mounted) return;
       messenger.showSnackBar(
-        SnackBar(content: Text('OCR reanalysis failed: $e')),
+        SnackBar(content: Text(formatReceiptAnalysisError(e))),
       );
     } finally {
       if (mounted) setState(() => _reanalyzingWithOcr = false);
@@ -102,7 +104,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
         ],
       ),
       body: PageShell(
-        padBottom: 96,
+        padBottom: 112,
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -143,79 +145,74 @@ class _ReviewScreenState extends State<ReviewScreen> {
                 delay: Duration(milliseconds: 200),
                 child: _PaidPanel(),
               ),
-              const SizedBox(height: 12),
-              Reveal(
-                delay: const Duration(milliseconds: 240),
-                child: _ReanalyzePanel(
-                  busy: _reanalyzingWithOcr,
-                  busyLabel: _ocrStageLabels[_ocrStage]!,
-                  onPressed: _reanalyzeWithOcr,
-                ),
-              ),
             ],
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.of(
+      floatingActionButton: _ReviewActions(
+        reanalyzing: _reanalyzingWithOcr,
+        reanalyzeLabel: _ocrStageLabels[_ocrStage]!,
+        onReanalyze: _reanalyzeWithOcr,
+        onSettleUp: () => Navigator.of(
           context,
         ).push(MaterialPageRoute(builder: (_) => const SummaryScreen())),
-        icon: const Icon(Icons.arrow_forward),
-        label: const Text('Settle up'),
-        backgroundColor: scheme.primary,
-        foregroundColor: scheme.onPrimary,
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
 }
 
-class _ReanalyzePanel extends StatelessWidget {
-  const _ReanalyzePanel({
-    required this.busy,
-    required this.busyLabel,
-    required this.onPressed,
+class _ReviewActions extends StatelessWidget {
+  const _ReviewActions({
+    required this.reanalyzing,
+    required this.reanalyzeLabel,
+    required this.onReanalyze,
+    required this.onSettleUp,
   });
 
-  final bool busy;
-  final String busyLabel;
-  final VoidCallback onPressed;
+  final bool reanalyzing;
+  final String reanalyzeLabel;
+  final VoidCallback onReanalyze;
+  final VoidCallback onSettleUp;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Text(
-              'Differ from the actual receipt?',
-              textAlign: TextAlign.center,
-              style: AppFonts.flex(size: 13, color: scheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: busy ? null : onPressed,
-              icon: busy
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        children: [
+          Expanded(
+            child: FloatingActionButton.extended(
+              heroTag: 'reanalyze',
+              onPressed: reanalyzing ? null : onReanalyze,
+              icon: reanalyzing
                   ? SizedBox(
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: scheme.error,
+                        color: scheme.onSecondaryContainer,
                       ),
                     )
-                  : const Icon(Icons.document_scanner_outlined, size: 18),
-              label: Text(busy ? busyLabel : 'Reanalyze'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: scheme.error,
-                side: BorderSide(color: scheme.error.withValues(alpha: 0.5)),
-              ),
+                  : const Icon(Icons.document_scanner_outlined),
+              label: Text(reanalyzing ? reanalyzeLabel : 'Reanalyze'),
+              backgroundColor: scheme.secondaryContainer,
+              foregroundColor: scheme.onSecondaryContainer,
             ),
-          ],
-        ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: FloatingActionButton.extended(
+              heroTag: 'settleUp',
+              onPressed: onSettleUp,
+              icon: const Icon(Icons.arrow_forward),
+              label: const Text('Settle up'),
+              backgroundColor: scheme.primary,
+              foregroundColor: scheme.onPrimary,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -231,20 +228,7 @@ class _SummaryHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    final subtotal =
-        receipt.items.fold<double>(0, (s, item) => s + item.lineTotal);
-    double running = subtotal;
-    for (final c in receipt.charges) {
-      if (c.mode != ChargeMode.exclusive) continue;
-      final amt = c.amount ?? (c.percent != null ? running * c.percent! : 0);
-      if (c.kind == ChargeKind.discount) {
-        running -= amt.abs();
-      } else {
-        running += amt;
-      }
-    }
-    final chargesTotal = running - subtotal;
-    final total = running;
+    final totals = calculateReceiptTotals(receipt);
 
     return Card(
       color: scheme.primaryContainer,
@@ -259,7 +243,7 @@ class _SummaryHero extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              fmt.format(total),
+              fmt.format(totals.total),
               style: AppFonts.serif(
                 size: 44,
                 weight: FontWeight.w400,
@@ -281,14 +265,14 @@ class _SummaryHero extends StatelessWidget {
                 Expanded(
                   child: _HeroMetric(
                     label: 'Subtotal',
-                    value: fmt.format(subtotal),
+                    value: fmt.format(totals.discountedSubtotal),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: _HeroMetric(
-                    label: 'Charges',
-                    value: fmt.format(chargesTotal),
+                    label: 'Tax and service',
+                    value: fmt.format(totals.chargesTotal),
                   ),
                 ),
               ],
@@ -301,11 +285,10 @@ class _SummaryHero extends StatelessWidget {
 }
 
 class _HeroMetric extends StatelessWidget {
-  const _HeroMetric({required this.label, required this.value, this.onTap});
+  const _HeroMetric({required this.label, required this.value});
 
   final String label;
   final String value;
-  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -339,12 +322,7 @@ class _HeroMetric extends StatelessWidget {
       ),
     );
 
-    if (onTap == null) return content;
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: onTap,
-      child: content,
-    );
+    return content;
   }
 }
 
@@ -357,6 +335,11 @@ class _ItemsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final totals = calculateReceiptTotals(receipt);
+    final itemSubtotal = receipt.items.fold<double>(
+      0,
+      (sum, item) => sum + item.lineTotal,
+    );
     return Card(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
@@ -391,7 +374,7 @@ class _ItemsCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Tap an avatar to claim. Long-press for quantity.',
+              'Tap on who shared the dish',
               style: AppFonts.flex(size: 12, color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 4),
@@ -399,9 +382,67 @@ class _ItemsCard extends StatelessWidget {
               Divider(color: scheme.outlineVariant, height: 1),
               ItemRow(item: receipt.items[i], fmt: fmt),
             ],
+            Divider(color: scheme.outlineVariant, height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(0, 12, 0, 6),
+              child: Column(
+                children: [
+                  _ItemsTotalRow(
+                    label: 'Items total',
+                    value: fmt.format(itemSubtotal),
+                  ),
+                  if (totals.discountTotal > 0) ...[
+                    const SizedBox(height: 6),
+                    _ItemsTotalRow(
+                      label: 'Discount',
+                      value: '-${fmt.format(totals.discountTotal)}',
+                    ),
+                  ],
+                  const SizedBox(height: 6),
+                  _ItemsTotalRow(
+                    label: 'Subtotal',
+                    value: fmt.format(totals.discountedSubtotal),
+                    emphasized: true,
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ItemsTotalRow extends StatelessWidget {
+  const _ItemsTotalRow({
+    required this.label,
+    required this.value,
+    this.emphasized = false,
+  });
+
+  final String label;
+  final String value;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final weight = emphasized ? FontWeight.w700 : FontWeight.w500;
+    final color = emphasized ? scheme.onSurface : scheme.onSurfaceVariant;
+
+    return Row(
+      children: [
+        Text(
+          label,
+          style: AppFonts.flex(size: 13, weight: weight, color: color),
+        ),
+        const Spacer(),
+        Text(
+          value,
+          style: AppFonts.mono(size: 13, weight: weight, color: color),
+        ),
+      ],
     );
   }
 }
@@ -523,4 +564,3 @@ class _PaidPanelState extends State<_PaidPanel> {
     );
   }
 }
-

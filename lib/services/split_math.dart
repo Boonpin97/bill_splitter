@@ -2,6 +2,7 @@ import '../models/receipt.dart';
 import '../models/payer.dart';
 import '../models/split_result.dart';
 import 'debt_simplifier.dart';
+import 'receipt_totals.dart';
 
 /// Computes per-payer totals and simplified transfers from the receipt,
 /// the assignment grid (payerId -> itemId -> quantity), and how much each
@@ -39,6 +40,22 @@ SplitResult computeSplit({
   }
 
   final subtotalAcross = itemTotals.values.fold<double>(0, (a, b) => a + b);
+  final discountedItemTotals = Map<String, double>.from(itemTotals);
+  var discountedSubtotal = subtotalAcross;
+  if (!_hasExclusiveDiscount(receipt)) {
+    final discount = _receiptSubtotalDiscount(receipt, subtotalAcross);
+    _applyDiscount(discountedItemTotals, payers, discountedSubtotal, discount);
+    discountedSubtotal -= discount;
+  }
+
+  for (final c in receipt.charges) {
+    if (c.mode != ChargeMode.exclusive || c.kind != ChargeKind.discount) {
+      continue;
+    }
+    final discount = chargeAmountForBase(c, discountedSubtotal).abs();
+    _applyDiscount(discountedItemTotals, payers, discountedSubtotal, discount);
+    discountedSubtotal -= discount;
+  }
 
   // Exclusive charges compound on each other in receipt order
   // (e.g. service charge first, then GST on subtotal + service).
@@ -46,54 +63,55 @@ SplitResult computeSplit({
   final perPayerBreakdowns = <String, List<ChargeEntry>>{
     for (final p in payers) p.id: [],
   };
-  double runningTotal = subtotalAcross;
+  double runningTotal = discountedSubtotal;
   for (final c in receipt.charges) {
-    if (c.mode != ChargeMode.exclusive) continue;
-    final amt = c.amount ?? (c.percent != null ? runningTotal * c.percent! : 0);
+    if (c.mode != ChargeMode.exclusive || c.kind == ChargeKind.discount) {
+      continue;
+    }
+    final amt = chargeAmountForBase(c, runningTotal);
     for (final p in payers) {
-      final proportion =
-          subtotalAcross > 0 ? (itemTotals[p.id] ?? 0) / subtotalAcross : 0.0;
+      final proportion = discountedSubtotal > 0
+          ? (discountedItemTotals[p.id] ?? 0) / discountedSubtotal
+          : 0.0;
       final personAmt = _round2(amt * proportion);
-      perPayerBreakdowns[p.id]!.add(ChargeEntry(
-        label: c.displayName(),
-        amount: c.kind == ChargeKind.discount ? -personAmt.abs() : personAmt,
-        percent: c.percent,
-      ));
+      perPayerBreakdowns[p.id]!.add(
+        ChargeEntry(
+          label: c.displayName(),
+          amount: personAmt,
+          percent: c.percent,
+        ),
+      );
     }
-    if (c.kind == ChargeKind.discount) {
-      runningTotal -= amt.abs();
-    } else {
-      runningTotal += amt;
-    }
+    runningTotal += amt;
   }
-  final exclusiveCharges = runningTotal - subtotalAcross;
+  final exclusiveCharges = runningTotal - discountedSubtotal;
 
   final chargeShare = <String, double>{};
   for (final p in payers) {
-    if (subtotalAcross <= 0) {
+    if (discountedSubtotal <= 0) {
       chargeShare[p.id] = 0;
     } else {
       chargeShare[p.id] =
-          exclusiveCharges * ((itemTotals[p.id] ?? 0) / subtotalAcross);
+          exclusiveCharges *
+          ((discountedItemTotals[p.id] ?? 0) / discountedSubtotal);
     }
   }
 
   // Round totals; absorb residual into first payer with a non-zero subtotal.
   final rawTotals = <String, double>{
     for (final p in payers)
-      p.id: (itemTotals[p.id] ?? 0) + (chargeShare[p.id] ?? 0),
+      p.id: (discountedItemTotals[p.id] ?? 0) + (chargeShare[p.id] ?? 0),
   };
   final rounded = <String, double>{
-    for (final entry in rawTotals.entries)
-      entry.key: _round2(entry.value),
+    for (final entry in rawTotals.entries) entry.key: _round2(entry.value),
   };
-  final grand = subtotalAcross + exclusiveCharges;
-  final residual = _round2(grand) -
-      rounded.values.fold<double>(0, (a, b) => a + b);
+  final grand = discountedSubtotal + exclusiveCharges;
+  final residual =
+      _round2(grand) - rounded.values.fold<double>(0, (a, b) => a + b);
   if (residual.abs() > 0.0001 && payers.isNotEmpty) {
     final anchor = payers
         .firstWhere(
-          (p) => (itemTotals[p.id] ?? 0) > 0,
+          (p) => (discountedItemTotals[p.id] ?? 0) > 0,
           orElse: () => payers.first,
         )
         .id;
@@ -101,17 +119,20 @@ SplitResult computeSplit({
   }
 
   final totals = payers
-      .map((p) => PayerTotal(
-            payerId: p.id,
-            itemTotal: _round2(itemTotals[p.id] ?? 0),
-            chargeShare: _round2((rounded[p.id] ?? 0) - (itemTotals[p.id] ?? 0)),
-            chargeBreakdown: perPayerBreakdowns[p.id] ?? [],
-          ))
+      .map(
+        (p) => PayerTotal(
+          payerId: p.id,
+          itemTotal: _round2(discountedItemTotals[p.id] ?? 0),
+          chargeShare: _round2(
+            (rounded[p.id] ?? 0) - (discountedItemTotals[p.id] ?? 0),
+          ),
+          chargeBreakdown: perPayerBreakdowns[p.id] ?? [],
+        ),
+      )
       .toList();
 
   final balances = <String, double>{
-    for (final p in payers)
-      p.id: (paid[p.id] ?? 0) - (rounded[p.id] ?? 0),
+    for (final p in payers) p.id: (paid[p.id] ?? 0) - (rounded[p.id] ?? 0),
   };
   final transfers = simplifyDebts(balances);
 
@@ -123,3 +144,28 @@ SplitResult computeSplit({
 }
 
 double _round2(double v) => (v * 100).round() / 100.0;
+
+bool _hasExclusiveDiscount(Receipt receipt) => receipt.charges.any(
+  (charge) =>
+      charge.mode == ChargeMode.exclusive && charge.kind == ChargeKind.discount,
+);
+
+double _receiptSubtotalDiscount(Receipt receipt, double itemSubtotal) {
+  final printedSubtotal = receipt.subtotal;
+  if (printedSubtotal <= 0 || printedSubtotal >= itemSubtotal) return 0;
+  return itemSubtotal - printedSubtotal;
+}
+
+void _applyDiscount(
+  Map<String, double> itemTotals,
+  List<Payer> payers,
+  double subtotal,
+  double discount,
+) {
+  if (subtotal <= 0 || discount <= 0) return;
+  for (final p in payers) {
+    final current = itemTotals[p.id] ?? 0;
+    final proportion = current / subtotal;
+    itemTotals[p.id] = current - (discount * proportion);
+  }
+}

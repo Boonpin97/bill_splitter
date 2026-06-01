@@ -94,7 +94,7 @@ firebase functions:secrets:set GEMINI_API_KEY
 
 ### 6. (Optional) Enable Document AI OCR
 
-Document AI extracts raw receipt text before Gemini sees the image, which improves accuracy on blurry or low-contrast receipts. It requires billing to be enabled on the Cloud project.
+Document AI extracts raw receipt text before the first Gemini call, so Gemini receives both OCR text and the original image. This improves accuracy on blurry or low-contrast receipts. It requires billing to be enabled on the Cloud project.
 
 1. Enable **Cloud Document AI API** in Google Cloud Console:
    ```
@@ -185,7 +185,7 @@ Covers split math (compounded exclusive charges, discounts, rounding residual) a
 |-------|-------|-----|
 | `429 RESOURCE_EXHAUSTED` | Free-tier Gemini rate limit (20 req / min) | Wait ~30 s; the function retries automatically if within the 60 s timeout. Upgrade to paid tier for higher throughput. |
 | `403 PERMISSION_DENIED` | Gemini key restriction too tight | Confirm **Generative Language API** is allowed in key settings, or temporarily set restrictions to *None*. |
-| `502` with `Gemini returned non-JSON` | Malformed Gemini response | Use a clearer photo, or tap **Reanalyze** to run Document AI OCR before Gemini. |
+| `502` with `Gemini returned non-JSON` | Malformed Gemini response | Use a clearer photo, or tap **Reanalyze** to run the OCR-assisted path again. |
 | Document AI `PERMISSION_DENIED` | Runtime service account missing role | Grant **Document AI API User** to the function's service account in IAM. |
 | Document AI `NOT_FOUND` | Wrong processor resource name | Confirm the full `projects/…/locations/…/processors/…` value in `functions/.env`. |
 | App shows hardcoded mock receipt after deploy | `USE_MOCK_ANALYZER=false` not passed at build time | Rebuild with `--dart-define=USE_MOCK_ANALYZER=false`. |
