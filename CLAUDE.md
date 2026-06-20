@@ -99,7 +99,9 @@ firebase deploy
 
 ## Useful Context
 
-- Gemini model currently configured: `gemini-2.5-flash`
+- Analysis provider selected by `RECEIPT_PROVIDER` env var: `gemini` (default) or `siliconflow`
+- Gemini model: `gemini-2.5-flash`; SiliconFlow model via `SILICONFLOW_MODEL` (default `Qwen/Qwen3-VL-8B-Instruct`)
+- API keys are Firebase secrets: `GEMINI_API_KEY`, `SILICONFLOW_API_KEY`
 - Function region: `asia-southeast1`
 - Optional OCR uses Document AI via `DOCUMENT_AI_PROCESSOR_NAME`
 - Rate-limit retry handling already exists in the function; preserve it unless intentionally redesigning request handling

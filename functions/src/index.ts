@@ -6,8 +6,22 @@ import { DocumentProcessorServiceClient } from "@google-cloud/documentai";
 setGlobalOptions({ region: "asia-southeast1", maxInstances: 5 });
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
+const SILICONFLOW_API_KEY = defineSecret("SILICONFLOW_API_KEY");
 
-const MODEL = "gemini-2.5-flash";
+type ReceiptProvider = "gemini" | "siliconflow";
+const RECEIPT_PROVIDER: ReceiptProvider =
+  (process.env.RECEIPT_PROVIDER ?? "gemini").toLowerCase() === "siliconflow"
+    ? "siliconflow"
+    : "gemini";
+
+const GEMINI_MODEL = "gemini-2.5-flash";
+const SILICONFLOW_MODEL =
+  process.env.SILICONFLOW_MODEL ?? "Qwen/Qwen3-VL-8B-Instruct";
+// SiliconFlow runs two separate platforms with non-interchangeable keys:
+// api.siliconflow.com (international, default) and api.siliconflow.cn (China).
+const SILICONFLOW_BASE_URL =
+  process.env.SILICONFLOW_BASE_URL ?? "https://api.siliconflow.com/v1";
+const SILICONFLOW_URL = `${SILICONFLOW_BASE_URL}/chat/completions`;
 const DOCUMENT_AI_PROCESSOR_NAME = process.env.DOCUMENT_AI_PROCESSOR_NAME ?? "";
 const DOCUMENT_AI_LOCATION =
   DOCUMENT_AI_PROCESSOR_NAME.match(/\/locations\/([^/]+)\//)?.[1] ?? "us";
@@ -89,12 +103,40 @@ interface AnalyzeRequest {
   analysisMode?: "auto" | "ocr";
 }
 
+class RateLimitError extends Error {
+  readonly retryAfterMs: number;
+  constructor(provider: string, detail: string, retryAfterMs: number) {
+    super(JSON.stringify({ error: `${provider} call failed: 429`, detail }));
+    this.name = "RateLimitError";
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+// Tolerant JSON parse: models occasionally wrap output in ```json fences even
+// when asked for raw JSON, so strip them before parsing.
+function parseModelJson(text: string, provider: string): unknown {
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    throw new Error(
+      JSON.stringify({
+        error: `${provider} returned non-JSON`,
+        sample: text.slice(0, 200),
+      })
+    );
+  }
+}
+
 async function callGemini(
   imageBase64: string,
   mimeType: string,
   ocrText?: string
 ): Promise<Response> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY.value()}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY.value()}`;
   const geminiBody = {
     contents: [
       {
@@ -123,16 +165,7 @@ async function callGemini(
   });
 }
 
-class GeminiRateLimitError extends Error {
-  readonly retryAfterMs: number;
-  constructor(detail: string, retryAfterMs: number) {
-    super(JSON.stringify({ error: "Gemini call failed: 429", detail }));
-    this.name = "GeminiRateLimitError";
-    this.retryAfterMs = retryAfterMs;
-  }
-}
-
-function parseRetryAfterMs(errText: string): number {
+function parseGeminiRetryAfterMs(errText: string): number {
   const match = errText.match(/retry in ([0-9.]+)s/i);
   return match ? Math.ceil(parseFloat(match[1]) * 1000) : 30_000;
 }
@@ -141,7 +174,11 @@ async function parseGeminiReceipt(geminiRes: Response): Promise<unknown> {
   if (!geminiRes.ok) {
     const errText = await geminiRes.text();
     if (geminiRes.status === 429) {
-      throw new GeminiRateLimitError(errText.slice(0, 500), parseRetryAfterMs(errText));
+      throw new RateLimitError(
+        "Gemini",
+        errText.slice(0, 500),
+        parseGeminiRetryAfterMs(errText)
+      );
     }
     throw new Error(
       JSON.stringify({
@@ -158,21 +195,90 @@ async function parseGeminiReceipt(geminiRes: Response): Promise<unknown> {
   if (!text) {
     throw new Error(JSON.stringify({ error: "Gemini returned no text" }));
   }
+  return parseModelJson(text, "Gemini");
+}
 
-  try {
-    return JSON.parse(text);
-  } catch {
+async function callSiliconFlow(
+  imageBase64: string,
+  mimeType: string,
+  ocrText?: string
+): Promise<Response> {
+  const body = {
+    model: SILICONFLOW_MODEL,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: promptWithOcrText(ocrText) },
+          {
+            type: "image_url",
+            image_url: { url: `data:${mimeType};base64,${imageBase64}` },
+          },
+        ],
+      },
+    ],
+    temperature: 0.1,
+    response_format: { type: "json_object" },
+  };
+
+  return fetch(SILICONFLOW_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${SILICONFLOW_API_KEY.value()}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+async function parseSiliconFlowReceipt(res: Response): Promise<unknown> {
+  if (!res.ok) {
+    const errText = await res.text();
+    if (res.status === 429) {
+      const retryAfter = res.headers.get("retry-after");
+      const retryAfterMs = retryAfter
+        ? Math.ceil(parseFloat(retryAfter) * 1000)
+        : 30_000;
+      throw new RateLimitError("SiliconFlow", errText.slice(0, 500), retryAfterMs);
+    }
     throw new Error(
       JSON.stringify({
-        error: "Gemini returned non-JSON",
-        sample: text.slice(0, 200),
+        error: `SiliconFlow call failed: ${res.status}`,
+        detail: errText.slice(0, 500),
       })
     );
   }
+
+  const json = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  const text = json.choices?.[0]?.message?.content;
+  if (!text) {
+    throw new Error(JSON.stringify({ error: "SiliconFlow returned no text" }));
+  }
+  return parseModelJson(text, "SiliconFlow");
+}
+
+// Dispatches to the configured provider and returns the parsed receipt JSON.
+async function analyzeWithProvider(
+  imageBase64: string,
+  mimeType: string,
+  ocrText?: string
+): Promise<unknown> {
+  if (RECEIPT_PROVIDER === "siliconflow") {
+    return parseSiliconFlowReceipt(
+      await callSiliconFlow(imageBase64, mimeType, ocrText)
+    );
+  }
+  return parseGeminiReceipt(await callGemini(imageBase64, mimeType, ocrText));
 }
 
 export const analyzeReceipt = onRequest(
-  { secrets: [GEMINI_API_KEY], timeoutSeconds: 60, memory: "512MiB" },
+  {
+    secrets: [GEMINI_API_KEY, SILICONFLOW_API_KEY],
+    timeoutSeconds: 60,
+    memory: "512MiB",
+  },
   async (req, res) => {
     // Lightweight warmup probe: the client pings this on page load so the
     // Cloud Run container is hot by the time the user uploads an image.
@@ -193,7 +299,7 @@ export const analyzeReceipt = onRequest(
 
     const imageMimeType = mimeType ?? "image/jpeg";
     const startMs = Date.now();
-    // Cloud Function timeout is 60 s; keep 10 s buffer for the actual Gemini call.
+    // Cloud Function timeout is 60 s; keep 10 s buffer for the actual model call.
     const maxWaitMs = 50_000;
     let ocrText: string | undefined;
 
@@ -201,24 +307,20 @@ export const analyzeReceipt = onRequest(
       try {
         ocrText = await extractOcrText(imageBase64, imageMimeType);
       } catch (e) {
-        console.warn("Document AI OCR failed; continuing with image-only Gemini", e);
+        console.warn("Document AI OCR failed; continuing with image-only analysis", e);
       }
 
       let parsed: unknown;
       try {
-        parsed = await parseGeminiReceipt(
-          await callGemini(imageBase64, imageMimeType, ocrText)
-        );
+        parsed = await analyzeWithProvider(imageBase64, imageMimeType, ocrText);
       } catch (e) {
-        if (e instanceof GeminiRateLimitError && analysisMode !== "ocr") {
+        if (e instanceof RateLimitError && analysisMode !== "ocr") {
           const elapsed = Date.now() - startMs;
           const wait = e.retryAfterMs;
           if (elapsed + wait < maxWaitMs) {
-            console.info(`Gemini rate-limited; waiting ${wait}ms then retrying.`);
+            console.info(`${RECEIPT_PROVIDER} rate-limited; waiting ${wait}ms then retrying.`);
             await new Promise((r) => setTimeout(r, wait));
-            parsed = await parseGeminiReceipt(
-              await callGemini(imageBase64, imageMimeType, ocrText)
-            );
+            parsed = await analyzeWithProvider(imageBase64, imageMimeType, ocrText);
           } else {
             throw e;
           }

@@ -29,7 +29,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     ReceiptAnalysisStage.warmingServer: 'Shaking up the server...',
     ReceiptAnalysisStage.sendingImage: 'Humbly offering the image...',
     ReceiptAnalysisStage.waitingForGoogle:
-        "Waiting for Google's magic to happen...",
+        "Waiting for AI's magic to happen...",
   };
 
   @override

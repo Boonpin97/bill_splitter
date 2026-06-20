@@ -109,7 +109,29 @@ Document AI extracts raw receipt text before the first Gemini call, so Gemini re
 
 Full walkthrough: [`docs/document-ai-ocr.md`](docs/document-ai-ocr.md)
 
-Cost: ~$0.0015 per receipt (one page at $1.50 / 1 000 pages). If `DOCUMENT_AI_PROCESSOR_NAME` is not set, the function uses Gemini image analysis only.
+Cost: ~$0.0015 per receipt (one page at $1.50 / 1 000 pages). If `DOCUMENT_AI_PROCESSOR_NAME` is not set, the function uses image analysis only.
+
+### 6b. (Optional) Use SiliconFlow instead of Gemini
+
+The function can route analysis through either Google Gemini (default) or a
+SiliconFlow-hosted vision model (e.g. `Qwen/Qwen3-VL-8B-Instruct`). Two env vars
+control this — set them on the function (Cloud Run env vars or `functions/.env`):
+
+```env
+RECEIPT_PROVIDER=siliconflow      # "siliconflow" or "gemini" (default)
+SILICONFLOW_MODEL=Qwen/Qwen3-VL-8B-Instruct
+```
+
+Store the SiliconFlow API key as a Firebase secret:
+
+```bash
+firebase functions:secrets:set SILICONFLOW_API_KEY
+# Paste the sk-… value at the prompt
+```
+
+When `RECEIPT_PROVIDER=siliconflow`, the function calls SiliconFlow's
+OpenAI-compatible `chat/completions` endpoint; Document AI OCR (step 6) still
+runs first when configured. Full walkthrough: [`docs/siliconflow-setup.md`](docs/siliconflow-setup.md)
 
 ### 7. Deploy the Cloud Function
 
@@ -212,8 +234,9 @@ lib/
   screens/        Home → Review → Summary
   widgets/        PeopleSection, ItemCard, ChargesPanel, ReceiptImage, PayerAvatar
 functions/
-  src/index.ts    analyzeReceipt Cloud Function (Gemini Vision + optional Document AI OCR)
+  src/index.ts    analyzeReceipt Cloud Function (Gemini or SiliconFlow + optional Document AI OCR)
 docs/
   gemini-setup.md           Gemini API key setup walkthrough
+  siliconflow-setup.md      SiliconFlow (Qwen3-VL) provider setup walkthrough
   document-ai-ocr.md        Document AI OCR setup walkthrough
 ```
