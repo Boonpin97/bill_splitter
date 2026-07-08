@@ -332,6 +332,7 @@ class _PayerQtyChip extends StatelessWidget {
                 size: 40,
                 qty: qty,
                 outlined: true,
+                showCount: true,
               ),
             ),
           ),
@@ -341,31 +342,29 @@ class _PayerQtyChip extends StatelessWidget {
           qty: qty,
           onDecrement: onDecrement,
           onIncrement: onIncrement,
-          onTapNumber: onEdit,
         ),
       ],
     );
   }
 }
 
-/// Compact −/+ pill for adjusting one payer's quantity of an item.
+/// Compact −/+ pill for adjusting one payer's quantity of an item. The
+/// current count is not shown here — it overlaps the avatar's bottom-right
+/// corner instead.
 class _QtyStepper extends StatelessWidget {
   const _QtyStepper({
     required this.qty,
     required this.onDecrement,
     required this.onIncrement,
-    required this.onTapNumber,
   });
 
   final int qty;
   final VoidCallback onDecrement;
   final VoidCallback onIncrement;
-  final VoidCallback onTapNumber;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final active = qty > 0;
 
     return Container(
       height: 26,
@@ -382,21 +381,7 @@ class _QtyStepper extends StatelessWidget {
             enabled: qty > 0,
             onTap: onDecrement,
           ),
-          GestureDetector(
-            onTap: onTapNumber,
-            child: SizedBox(
-              width: 22,
-              child: Text(
-                '$qty',
-                textAlign: TextAlign.center,
-                style: AppFonts.mono(
-                  size: 12,
-                  weight: FontWeight.w700,
-                  color: active ? scheme.onSurface : scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ),
+          const SizedBox(width: 4),
           _StepButton(
             icon: Icons.add,
             enabled: true,

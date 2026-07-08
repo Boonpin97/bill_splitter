@@ -30,6 +30,7 @@ class PayerAvatar extends StatelessWidget {
     this.size = 40,
     this.qty = 0,
     this.outlined = false,
+    this.showCount = false,
   });
 
   final Payer payer;
@@ -37,6 +38,10 @@ class PayerAvatar extends StatelessWidget {
   final double size;
   final int qty;
   final bool outlined;
+
+  /// When true, the quantity is stamped as a badge overlapping the
+  /// bottom-right corner. Left off for avatars used purely as chips.
+  final bool showCount;
 
   String get _initial =>
       payer.name.isEmpty ? '·' : payer.name.characters.first.toUpperCase();
@@ -78,7 +83,7 @@ class PayerAvatar extends StatelessWidget {
               height: 1.0,
             ),
           ),
-          if (qty > 1)
+          if (showCount && qty >= 1)
             Positioned(
               right: -4,
               bottom: -4,
