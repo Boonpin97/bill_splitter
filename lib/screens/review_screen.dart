@@ -128,17 +128,17 @@ class _ReviewScreenState extends State<ReviewScreen> {
               const SizedBox(height: 24),
               const Reveal(
                 delay: Duration(milliseconds: 60),
+                child: ChargesPanel(),
+              ),
+              const SizedBox(height: 24),
+              const Reveal(
+                delay: Duration(milliseconds: 100),
                 child: PeopleSection(),
               ),
               const SizedBox(height: 24),
               Reveal(
-                delay: const Duration(milliseconds: 120),
+                delay: const Duration(milliseconds: 140),
                 child: _ItemsCard(receipt: receipt, fmt: fmt),
-              ),
-              const SizedBox(height: 12),
-              const Reveal(
-                delay: Duration(milliseconds: 160),
-                child: ChargesPanel(),
               ),
               const SizedBox(height: 12),
               const Reveal(

@@ -63,8 +63,12 @@ ReceiptTotals calculateReceiptTotals(Receipt receipt) {
 double chargeAmountForBase(Charge charge, double base) =>
     _chargeAmount(charge, base);
 
+// Prefer the amount printed on the receipt. Only fall back to the
+// percentage when the receipt gave no explicit amount for the charge.
 double _chargeAmount(Charge charge, double base) =>
-    charge.percent != null ? base * charge.percent! : (charge.amount ?? 0);
+    charge.amount != null
+    ? charge.amount!
+    : (charge.percent != null ? base * charge.percent! : 0);
 
 double _receiptSubtotalDiscount(Receipt receipt, double itemSubtotal) {
   final printedSubtotal = receipt.subtotal;

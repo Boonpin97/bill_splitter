@@ -193,7 +193,7 @@ void main() {
     });
 
     test(
-      'percentage charge calculation wins until printed amount is selected',
+      'printed receipt amount wins by default over the calculated percentage',
       () {
         final item = LineItem(name: 'Meal', unitPrice: 100, quantity: 1);
         final receipt = Receipt(
@@ -208,7 +208,7 @@ void main() {
             ),
           ],
           subtotal: 100,
-          total: 110,
+          total: 112,
         );
         final payer = Payer(name: 'A');
 
@@ -218,11 +218,11 @@ void main() {
           assignments: {
             payer.id: {item.id: 1},
           },
-          paid: {payer.id: 110},
+          paid: {payer.id: 112},
         );
 
-        expect(result.grandTotal, closeTo(110, 0.01));
-        expect(result.totals.first.chargeShare, closeTo(10, 0.01));
+        expect(result.grandTotal, closeTo(112, 0.01));
+        expect(result.totals.first.chargeShare, closeTo(12, 0.01));
       },
     );
 

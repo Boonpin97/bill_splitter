@@ -69,6 +69,7 @@ class ChargesPanel extends StatelessWidget {
                 charge: row.charge,
                 amount: row.amount,
                 printedAmount: row.printedAmount,
+                calculatedAmount: row.calculatedAmount,
                 onModeChange: (m) => state.updateChargeMode(row.index, m),
                 onAmountChange: (v) => state.updateChargeAmount(row.index, v),
                 onPercentChange: (v) => state.updateChargePercent(row.index, v),
@@ -117,7 +118,15 @@ List<_ChargeRow> _chargeRows(Receipt receipt) {
     if (charge.kind == ChargeKind.discount) continue;
 
     final amount = chargeAmountForBase(charge, running);
-    rows.add(_ChargeRow(index: i, charge: charge, amount: amount));
+    final calculated = charge.percent != null ? running * charge.percent! : null;
+    rows.add(
+      _ChargeRow(
+        index: i,
+        charge: charge,
+        amount: amount,
+        calculatedAmount: calculated,
+      ),
+    );
     running += amount;
   }
 
@@ -129,11 +138,19 @@ class _ChargeRow {
     required this.index,
     required this.charge,
     required this.amount,
+    this.calculatedAmount,
   });
 
   final int index;
   final Charge charge;
+
+  /// Active amount used in the totals — defaults to the receipt's printed
+  /// amount when present.
   final double amount;
+
+  /// Percentage-derived amount, when the charge carries a percent. Used to
+  /// surface a discrepancy against the printed receipt amount.
+  final double? calculatedAmount;
 
   double? get printedAmount => charge.percent != null ? charge.amount : null;
 }
@@ -143,6 +160,7 @@ class _ChargeTile extends StatelessWidget {
     required this.charge,
     required this.amount,
     required this.printedAmount,
+    required this.calculatedAmount,
     required this.onModeChange,
     required this.onAmountChange,
     required this.onPercentChange,
@@ -151,6 +169,7 @@ class _ChargeTile extends StatelessWidget {
   final Charge charge;
   final double amount;
   final double? printedAmount;
+  final double? calculatedAmount;
   final ValueChanged<ChargeMode> onModeChange;
   final ValueChanged<double> onAmountChange;
   final ValueChanged<double> onPercentChange;
@@ -171,8 +190,9 @@ class _ChargeTile extends StatelessWidget {
 
     final descriptor = amount.toStringAsFixed(2);
     final printed = printedAmount;
+    final calc = calculatedAmount;
     final hasPrintedMismatch =
-        pct != null && printed != null && (printed - amount).abs() > 0.01;
+        calc != null && printed != null && (printed - calc).abs() > 0.01;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -251,7 +271,8 @@ class _ChargeTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Receipt amount differs from calculated amount.',
+                    'Receipt amount differs from calculated amount. '
+                    'Using the receipt amount.',
                     style: AppFonts.flex(
                       size: 12,
                       weight: FontWeight.w600,
@@ -260,7 +281,7 @@ class _ChargeTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Calculated: ${amount.toStringAsFixed(2)}  |  Receipt: ${printed.toStringAsFixed(2)}',
+                    'Calculated: ${calc.toStringAsFixed(2)}  |  Receipt: ${printed.toStringAsFixed(2)}',
                     style: AppFonts.mono(
                       size: 12,
                       color: scheme.onErrorContainer,
@@ -272,7 +293,7 @@ class _ChargeTile extends StatelessWidget {
                     runSpacing: 8,
                     children: [
                       OutlinedButton(
-                        onPressed: () => onPercentChange(pct),
+                        onPressed: () => onPercentChange(pct!),
                         style: OutlinedButton.styleFrom(
                           visualDensity: VisualDensity.compact,
                           foregroundColor: scheme.onErrorContainer,
