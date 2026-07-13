@@ -22,7 +22,7 @@ class ReviewScreen extends StatefulWidget {
     required this.mimeType,
   });
 
-  final Uint8List imageBytes;
+  final Uint8List? imageBytes;
   final String mimeType;
 
   @override
@@ -42,6 +42,9 @@ class _ReviewScreenState extends State<ReviewScreen> {
   };
 
   Future<void> _reanalyzeWithOcr() async {
+    final imageBytes = widget.imageBytes;
+    if (imageBytes == null) return;
+
     setState(() {
       _reanalyzingWithOcr = true;
       _ocrStage = ReceiptAnalysisStage.warmingServer;
@@ -50,7 +53,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
     try {
       final analyzer = context.read<ReceiptAnalyzer>();
       final receipt = await analyzer.analyze(
-        widget.imageBytes,
+        imageBytes,
         mimeType: widget.mimeType,
         useOcr: true,
         onStage: (stage) {
@@ -71,6 +74,23 @@ class _ReviewScreenState extends State<ReviewScreen> {
     } finally {
       if (mounted) setState(() => _reanalyzingWithOcr = false);
     }
+  }
+
+  Future<void> _settleUp(BillState state) async {
+    final mismatches = state.quantityMismatchItems;
+    if (mismatches.isNotEmpty) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (context) =>
+            _QuantityMismatchDialog(state: state, items: mismatches),
+      );
+      if (proceed != true || !mounted) return;
+    }
+
+    if (!mounted) return;
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SummaryScreen()));
   }
 
   @override
@@ -95,11 +115,12 @@ class _ReviewScreenState extends State<ReviewScreen> {
           onPressed: () => Navigator.of(context).maybePop(),
         ),
         actions: [
-          IconButton(
-            tooltip: _showImage ? 'Hide receipt' : 'Show receipt',
-            onPressed: () => setState(() => _showImage = !_showImage),
-            icon: Icon(_showImage ? Icons.image : Icons.image_outlined),
-          ),
+          if (widget.imageBytes != null)
+            IconButton(
+              tooltip: _showImage ? 'Hide receipt' : 'Show receipt',
+              onPressed: () => setState(() => _showImage = !_showImage),
+              icon: Icon(_showImage ? Icons.image : Icons.image_outlined),
+            ),
           const SizedBox(width: 4),
         ],
       ),
@@ -112,19 +133,20 @@ class _ReviewScreenState extends State<ReviewScreen> {
               Reveal(
                 child: _SummaryHero(receipt: receipt, fmt: fmt),
               ),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 240),
-                curve: Curves.easeOutCubic,
-                child: _showImage
-                    ? Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 360),
-                          child: ReceiptImage(bytes: widget.imageBytes),
-                        ),
-                      )
-                    : const SizedBox.shrink(),
-              ),
+              if (widget.imageBytes != null)
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 240),
+                  curve: Curves.easeOutCubic,
+                  child: _showImage
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 360),
+                            child: ReceiptImage(bytes: widget.imageBytes),
+                          ),
+                        )
+                      : const SizedBox.shrink(),
+                ),
               const SizedBox(height: 24),
               const Reveal(
                 delay: Duration(milliseconds: 60),
@@ -152,12 +174,95 @@ class _ReviewScreenState extends State<ReviewScreen> {
       floatingActionButton: _ReviewActions(
         reanalyzing: _reanalyzingWithOcr,
         reanalyzeLabel: _ocrStageLabels[_ocrStage]!,
-        onReanalyze: _reanalyzeWithOcr,
-        onSettleUp: () => Navigator.of(
-          context,
-        ).push(MaterialPageRoute(builder: (_) => const SummaryScreen())),
+        onReanalyze: widget.imageBytes == null ? null : _reanalyzeWithOcr,
+        onSettleUp: () => _settleUp(state),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+    );
+  }
+}
+
+class _QuantityMismatchDialog extends StatelessWidget {
+  const _QuantityMismatchDialog({required this.state, required this.items});
+
+  final BillState state;
+  final List<LineItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    const warning = Color(0xFFB45309);
+    const warningSurface = Color(0xFFFFF4E5);
+
+    return AlertDialog(
+      icon: const Icon(Icons.warning_amber_rounded, color: warning, size: 32),
+      title: const Text("Quantities don't tally"),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400, maxHeight: 340),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Some assigned shares do not match the receipt quantities. '
+                'You can review them or continue anyway.',
+                style: AppFonts.flex(size: 13, color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 16),
+              for (final item in items) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: warningSurface,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: warning.withValues(alpha: 0.24)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          item.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppFonts.flex(
+                            size: 12,
+                            weight: FontWeight.w600,
+                            color: scheme.onSurface,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        '${state.assignedFor(item.id)} / ${item.quantity}',
+                        style: AppFonts.mono(
+                          size: 12,
+                          weight: FontWeight.w700,
+                          color: warning,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Review quantities'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Continue anyway'),
+        ),
+      ],
     );
   }
 }
@@ -172,7 +277,7 @@ class _ReviewActions extends StatelessWidget {
 
   final bool reanalyzing;
   final String reanalyzeLabel;
-  final VoidCallback onReanalyze;
+  final VoidCallback? onReanalyze;
   final VoidCallback onSettleUp;
 
   @override
@@ -182,26 +287,28 @@ class _ReviewActions extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
         children: [
-          Expanded(
-            child: FloatingActionButton.extended(
-              heroTag: 'reanalyze',
-              onPressed: reanalyzing ? null : onReanalyze,
-              icon: reanalyzing
-                  ? SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: scheme.onSecondaryContainer,
-                      ),
-                    )
-                  : const Icon(Icons.document_scanner_outlined),
-              label: Text(reanalyzing ? reanalyzeLabel : 'Reanalyze'),
-              backgroundColor: scheme.secondaryContainer,
-              foregroundColor: scheme.onSecondaryContainer,
+          if (onReanalyze != null) ...[
+            Expanded(
+              child: FloatingActionButton.extended(
+                heroTag: 'reanalyze',
+                onPressed: reanalyzing ? null : onReanalyze,
+                icon: reanalyzing
+                    ? SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: scheme.onSecondaryContainer,
+                        ),
+                      )
+                    : const Icon(Icons.document_scanner_outlined),
+                label: Text(reanalyzing ? reanalyzeLabel : 'Reanalyze'),
+                backgroundColor: scheme.secondaryContainer,
+                foregroundColor: scheme.onSecondaryContainer,
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
+            const SizedBox(width: 12),
+          ],
           Expanded(
             child: FloatingActionButton.extended(
               heroTag: 'settleUp',

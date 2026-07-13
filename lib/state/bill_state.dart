@@ -49,6 +49,12 @@ class BillState extends ChangeNotifier {
   /// payerId -> itemId -> quantity claimed
   final Map<String, Map<String, int>> _assignments = {};
 
+  /// Tracks assignment flow so quantity warnings only appear after the user
+  /// leaves a dish and starts assigning another one.
+  String? _activeAssignmentItemId;
+  final Set<String> _editedAssignmentItems = {};
+  final Set<String> _leftAssignmentItems = {};
+
   /// payerId -> amount paid at the till. Default: first payer paid the total.
   final Map<String, double> _paid = {};
 
@@ -63,6 +69,9 @@ class BillState extends ChangeNotifier {
   void setReceipt(Receipt receipt) {
     _receipt = receipt;
     _assignments.clear();
+    _activeAssignmentItemId = null;
+    _editedAssignmentItems.clear();
+    _leftAssignmentItems.clear();
     for (final p in _payers) {
       _assignments[p.id] = {for (final it in receipt.items) it.id: 0};
     }
@@ -75,10 +84,32 @@ class BillState extends ChangeNotifier {
   int qty(String payerId, String itemId) => _assignments[payerId]?[itemId] ?? 0;
 
   void setQty(String payerId, String itemId, int value) {
+    _focusAssignmentItem(itemId);
     final v = value < 0 ? 0 : value;
+    if (qty(payerId, itemId) != v) _editedAssignmentItems.add(itemId);
     _assignments.putIfAbsent(payerId, () => {})[itemId] = v;
     notifyListeners();
   }
+
+  /// Marks [itemId] as the dish currently being assigned. Moving to a new
+  /// dish makes the previous one eligible for a non-blocking tally warning.
+  void focusAssignmentItem(String itemId) {
+    if (_focusAssignmentItem(itemId)) notifyListeners();
+  }
+
+  bool _focusAssignmentItem(String itemId) {
+    if (_activeAssignmentItemId == itemId) return false;
+    final previous = _activeAssignmentItemId;
+    if (previous != null && _editedAssignmentItems.contains(previous)) {
+      _leftAssignmentItems.add(previous);
+    }
+    _activeAssignmentItemId = itemId;
+    return true;
+  }
+
+  bool shouldShowQuantityWarning(String itemId) =>
+      _leftAssignmentItems.contains(itemId) &&
+      _activeAssignmentItemId != itemId;
 
   void incrementQty(String payerId, String itemId) {
     setQty(payerId, itemId, qty(payerId, itemId) + 1);
@@ -94,6 +125,14 @@ class BillState extends ChangeNotifier {
       sum += row[itemId] ?? 0;
     }
     return sum;
+  }
+
+  List<LineItem> get quantityMismatchItems {
+    final receipt = _receipt;
+    if (receipt == null) return const [];
+    return List.unmodifiable(
+      receipt.items.where((item) => assignedFor(item.id) != item.quantity),
+    );
   }
 
   void renamePayer(String id, String name) {

@@ -57,6 +57,8 @@ bool _isLimitExceededError(String normalized) {
 }
 
 abstract class ReceiptAnalyzer {
+  Receipt? get sampleReceipt => null;
+
   Future<Receipt> analyze(
     Uint8List bytes, {
     String mimeType = 'image/jpeg',
@@ -74,7 +76,7 @@ abstract class ReceiptAnalyzer {
 /// `/api/analyzeReceipt`. When built and served from the same Hosting origin the
 /// relative path works directly; for local dev set `--dart-define=API_BASE=https://bill-splitt.web.app`
 /// to call the deployed instance.
-class FirebaseReceiptAnalyzer implements ReceiptAnalyzer {
+class FirebaseReceiptAnalyzer extends ReceiptAnalyzer {
   FirebaseReceiptAnalyzer({String apiBase = ''})
     : _endpoint = Uri.parse(
         '${apiBase.isEmpty ? '' : apiBase}/api/analyzeReceipt',
@@ -125,7 +127,25 @@ class FirebaseReceiptAnalyzer implements ReceiptAnalyzer {
 }
 
 /// Local stand-in used until the Cloud Function is deployed.
-class MockReceiptAnalyzer implements ReceiptAnalyzer {
+class MockReceiptAnalyzer extends ReceiptAnalyzer {
+  @override
+  Receipt get sampleReceipt => Receipt.fromJson({
+    'currency': 'SGD',
+    'items': [
+      {'name': 'Char Kway Teow', 'unitPrice': 8.5, 'quantity': 1},
+      {'name': 'Hokkien Mee', 'unitPrice': 9.0, 'quantity': 1},
+      {'name': 'Satay (10 sticks)', 'unitPrice': 12.0, 'quantity': 1},
+      {'name': 'Iced Milo', 'unitPrice': 3.5, 'quantity': 2},
+      {'name': 'Sugarcane Juice', 'unitPrice': 3.0, 'quantity': 1},
+    ],
+    'charges': [
+      {'kind': 'service', 'mode': 'exclusive', 'percent': 0.10},
+      {'kind': 'gst', 'mode': 'exclusive', 'percent': 0.09},
+    ],
+    'subtotal': 39.5,
+    'total': 47.36,
+  });
+
   @override
   Future<void> warm() async {}
 
@@ -142,21 +162,6 @@ class MockReceiptAnalyzer implements ReceiptAnalyzer {
     await Future.delayed(const Duration(milliseconds: 250));
     onStage?.call(ReceiptAnalysisStage.waitingForGoogle);
     await Future.delayed(const Duration(milliseconds: 5000));
-    return Receipt.fromJson({
-      'currency': 'SGD',
-      'items': [
-        {'name': 'Char Kway Teow', 'unitPrice': 8.5, 'quantity': 1},
-        {'name': 'Hokkien Mee', 'unitPrice': 9.0, 'quantity': 1},
-        {'name': 'Satay (10 sticks)', 'unitPrice': 12.0, 'quantity': 1},
-        {'name': 'Iced Milo', 'unitPrice': 3.5, 'quantity': 2},
-        {'name': 'Sugarcane Juice', 'unitPrice': 3.0, 'quantity': 1},
-      ],
-      'charges': [
-        {'kind': 'service', 'mode': 'exclusive', 'percent': 0.10},
-        {'kind': 'gst', 'mode': 'exclusive', 'percent': 0.09},
-      ],
-      'subtotal': 39.5,
-      'total': 47.36,
-    });
+    return sampleReceipt;
   }
 }

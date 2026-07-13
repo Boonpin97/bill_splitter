@@ -85,22 +85,24 @@ class PayerAvatar extends StatelessWidget {
           ),
           if (showCount && qty >= 1)
             Positioned(
-              right: -4,
-              bottom: -4,
+              right: -11,
+              bottom: -11,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 3),
                 decoration: BoxDecoration(
                   color: scheme.primary,
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(color: scheme.surface, width: 1.5),
                 ),
-                child: Text(
-                  '$qty',
-                  style: AppFonts.mono(
-                    size: 10,
-                    weight: FontWeight.w700,
-                    color: scheme.onPrimary,
+                child: Center(
+                  child: Text(
+                    '$qty',
+                    style: AppFonts.mono(
+                      size: 9,
+                      weight: FontWeight.w700,
+                      color: scheme.onPrimary,
+                    ),
                   ),
                 ),
               ),

@@ -34,7 +34,10 @@ flutter pub get
 flutter run -d chrome
 ```
 
-Pick any image. A sample hawker-stall receipt is returned so you can explore the full UI without any API keys.
+Click **Use sample receipt** to open the review flow immediately with fixed
+hawker-stall data. You can also pick any image and click **Analyze**; mock mode
+ignores the image contents and returns the same fixed receipt. No Firebase
+project, API key, or backend is required.
 
 ---
 

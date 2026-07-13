@@ -100,6 +100,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
+  void _useSampleReceipt() {
+    final receipt = context.read<ReceiptAnalyzer>().sampleReceipt;
+    if (receipt == null) return;
+
+    context.read<BillState>().setReceipt(receipt);
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            const ReviewScreen(imageBytes: null, mimeType: 'image/jpeg'),
+      ),
+    );
+  }
+
   void _clearImage() => setState(() => _bytes = null);
 
   @override
@@ -113,6 +126,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final hasImage = _bytes != null;
+    final hasSampleReceipt =
+        context.read<ReceiptAnalyzer>().sampleReceipt != null;
 
     return Scaffold(
       backgroundColor: scheme.surface,
@@ -214,6 +229,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ),
                 ),
               ),
+              if (hasSampleReceipt) ...[
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: _analyzing ? null : _useSampleReceipt,
+                  icon: const Icon(Icons.science_outlined, size: 18),
+                  label: const Text('Use sample receipt'),
+                ),
+              ],
               if (_error != null) ...[
                 const SizedBox(height: 16),
                 _ErrorCard(error: _error!),
